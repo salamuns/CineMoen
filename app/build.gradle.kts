@@ -21,7 +21,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "rip.mapple.app"
+        applicationId = "com.cinemoen.app"
         minSdk = 26
         targetSdk = 34
         versionCode = buildNumber
