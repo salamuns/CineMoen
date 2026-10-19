@@ -11,13 +11,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Mapple">
+        android:theme="@style/Theme.CineMoen">
 
         <activity
             android:name=".MainActivity"
             android:screenOrientation="sensor"
             android:exported="true"
-            android:theme="@style/Theme.Mapple.Splash"
+            android:theme="@style/Theme.CineMoen.Splash"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

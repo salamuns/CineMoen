@@ -70,9 +70,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var picker: ScrollView
     private lateinit var pickerList: LinearLayout
     private var pickerVisible = true
-    private var currentUrl = "https://mapple.rip"
+    private var currentUrl = "https://7movies.ac"
     private var clearHistoryOnFinish = false
-    private val prefs by lazy { getSharedPreferences("mapple", MODE_PRIVATE) }
+    private val prefs by lazy { getSharedPreferences("cinemoen", MODE_PRIVATE) }
 
     // Untuk upload file
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -189,7 +189,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAddDialog() {
         val input = EditText(this)
-        input.hint = "contoh: mapple.example"
+        input.hint = "contoh: cinemoen.example"
         input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val holder = FrameLayout(this)
         holder.setPadding(dp(20), dp(8), dp(20), 0)
