@@ -8,7 +8,7 @@
     <style name="Theme.CineMoen.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
-        <item name="postSplashScreenTheme">@style/Theme.Mapple</item>
+        <item name="postSplashScreenTheme">@style/Theme.CineMoen</item>
     </style>
 
     <color name="ic_launcher_background">#FFFFFF</color>
