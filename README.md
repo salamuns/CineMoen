@@ -1,6 +1,6 @@
 # CineMoen
 
-Aplikasi Android (WebView) dengan pilihan alamat situs.
+Aplikasi Android Nonton Streaming dengan pilihan alamat situs.
 
 ## Build APK lewat GitHub Actions
 1. Push repo ini ke GitHub.
