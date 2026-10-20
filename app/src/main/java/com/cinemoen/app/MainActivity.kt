@@ -26,6 +26,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -70,9 +71,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var picker: ScrollView
     private lateinit var pickerList: LinearLayout
     private var pickerVisible = true
-    private var currentUrl = "https://7movies.ac"
+    private var currentUrl = "https://mapple.rip"
     private var clearHistoryOnFinish = false
-    private val prefs by lazy { getSharedPreferences("cinemoen", MODE_PRIVATE) }
+
+    // Splash gambar saat aplikasi dibuka
+    private var splashView: View? = null
+    private val splashHandler = Handler(Looper.getMainLooper())
+    private val splashRunnable = Runnable { dismissSplash() }
+    private val prefs by lazy { getSharedPreferences("mapple", MODE_PRIVATE) }
 
     // Untuk upload file
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -189,7 +195,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAddDialog() {
         val input = EditText(this)
-        input.hint = "contoh: cinemoen.example"
+        input.hint = "contoh: mapple.example"
         input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val holder = FrameLayout(this)
         holder.setPadding(dp(20), dp(8), dp(20), 0)
@@ -443,6 +449,8 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    // Sedang splash: lewati ke layar pilihan
+                    splashView != null -> dismissSplash()
                     // Di layar pilihan: keluar aplikasi
                     pickerVisible -> {
                         isEnabled = false
@@ -465,7 +473,40 @@ class MainActivity : AppCompatActivity() {
             webView.restoreState(savedInstanceState)
         } else {
             showPicker()
+            // Splash hanya saat aplikasi baru dibuka (bukan saat dipulihkan sistem)
+            if (savedInstanceState == null) showSplash()
         }
+    }
+
+    // Splash: poster logo tampil sebentar, ketuk layar untuk melewati
+    private fun showSplash() {
+        val column = LinearLayout(this)
+        column.orientation = LinearLayout.VERTICAL
+        column.setBackgroundColor(0xFF0A3349.toInt()) // warna bagian bawah poster
+
+        val image = ImageView(this)
+        image.setImageResource(R.drawable.splash_poster)
+        image.adjustViewBounds = true
+        image.scaleType = ImageView.ScaleType.FIT_CENTER
+        column.addView(
+            image,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        column.setOnClickListener { dismissSplash() }
+
+        splashView = column
+        root.addView(column, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        splashHandler.postDelayed(splashRunnable, 2500)
+    }
+
+    private fun dismissSplash() {
+        val v = splashView ?: return
+        splashView = null
+        splashHandler.removeCallbacks(splashRunnable)
+        v.animate().alpha(0f).setDuration(350).withEndAction { root.removeView(v) }.start()
     }
 
     // Sembunyikan status bar & navigation bar. Geser dari tepi layar untuk memunculkannya sebentar.
@@ -492,6 +533,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() { webView.onPause(); super.onPause() }
 
     override fun onDestroy() {
+        splashHandler.removeCallbacks(splashRunnable)
         root.removeAllViews()
         webView.destroy()
         super.onDestroy()
