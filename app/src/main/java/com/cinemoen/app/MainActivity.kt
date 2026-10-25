@@ -6,6 +6,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -480,25 +481,17 @@ class MainActivity : AppCompatActivity() {
 
     // Splash: poster logo tampil sebentar, ketuk layar untuk melewati
     private fun showSplash() {
-        val column = LinearLayout(this)
-        column.orientation = LinearLayout.VERTICAL
-        column.setBackgroundColor(0xFF0A3349.toInt()) // warna bagian bawah poster
-
         val image = ImageView(this)
         image.setImageResource(R.drawable.splash_poster)
-        image.adjustViewBounds = true
-        image.scaleType = ImageView.ScaleType.FIT_CENTER
-        column.addView(
-            image,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
-        column.setOnClickListener { dismissSplash() }
+        // Isi seluruh layar; kelebihan atas/bawah gambar (putih & biru) dipotong sesuai rasio layar
+        image.scaleType = ImageView.ScaleType.CENTER_CROP
+        image.setBackgroundColor(0xFF063449.toInt())
+        image.setOnClickListener { dismissSplash() }
 
-        splashView = column
-        root.addView(column, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        // Warnai latar jendela & status bar putih selama splash agar strip atas menyatu dengan poster
+        setWindowColors(0xFFFEFEFE.toInt())
+        splashView = image
+        root.addView(image, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         splashHandler.postDelayed(splashRunnable, 2500)
     }
 
@@ -506,7 +499,15 @@ class MainActivity : AppCompatActivity() {
         val v = splashView ?: return
         splashView = null
         splashHandler.removeCallbacks(splashRunnable)
-        v.animate().alpha(0f).setDuration(350).withEndAction { root.removeView(v) }.start()
+        v.animate().alpha(0f).setDuration(350).withEndAction {
+            root.removeView(v)
+            setWindowColors(0xFF1E1E2E.toInt()) // kembalikan warna latar aplikasi
+        }.start()
+    }
+
+    private fun setWindowColors(color: Int) {
+        window.setBackgroundDrawable(ColorDrawable(color))
+        window.statusBarColor = color
     }
 
     // Sembunyikan status bar & navigation bar. Geser dari tepi layar untuk memunculkannya sebentar.
