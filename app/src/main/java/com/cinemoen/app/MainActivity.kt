@@ -3,6 +3,7 @@
 package com.cinemoen.app
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -11,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -19,6 +21,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -447,6 +451,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Link unduhan (file) diserahkan ke pengelola unduhan Android
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            startDownload(url, userAgent, contentDisposition, mimeType)
+        }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
@@ -508,6 +517,41 @@ class MainActivity : AppCompatActivity() {
     private fun setWindowColors(color: Int) {
         window.setBackgroundDrawable(ColorDrawable(color))
         window.statusBarColor = color
+    }
+
+    private fun startDownload(
+        url: String,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimeType: String?
+    ) {
+        if (url.startsWith("blob:") || url.startsWith("data:")) {
+            Toast.makeText(this, "Jenis unduhan ini belum didukung", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            val request = DownloadManager.Request(Uri.parse(url))
+            if (mimeType != null) request.setMimeType(mimeType)
+            if (userAgent != null) request.addRequestHeader("User-Agent", userAgent)
+            val cookies = CookieManager.getInstance().getCookie(url)
+            if (cookies != null) request.addRequestHeader("Cookie", cookies)
+            request.setTitle(fileName)
+            request.setNotificationVisibility(
+                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            )
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
+            Toast.makeText(this, "Mengunduh: $fileName", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            // Cadangan: buka link di aplikasi/browser lain
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "Gagal mengunduh", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // Sembunyikan status bar & navigation bar. Geser dari tepi layar untuk memunculkannya sebentar.
