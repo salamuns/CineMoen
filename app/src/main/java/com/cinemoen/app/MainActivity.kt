@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var picker: ScrollView
     private lateinit var pickerList: LinearLayout
     private var pickerVisible = true
-    private var currentUrl = "https://mapple.rip"
+    private var currentUrl = "https://popcornmovies.ac"
     private var clearHistoryOnFinish = false
 
     // Splash gambar saat aplikasi dibuka
