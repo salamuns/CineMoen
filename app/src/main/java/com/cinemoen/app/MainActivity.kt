@@ -4,6 +4,7 @@ package com.cinemoen.app
 
 import android.annotation.SuppressLint
 import android.app.DownloadManager
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -17,7 +18,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Message
 import android.text.InputType
+import android.util.Rational
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -75,9 +79,13 @@ class MainActivity : AppCompatActivity() {
     // Layar pilihan alamat
     private lateinit var picker: ScrollView
     private lateinit var pickerList: LinearLayout
+    private lateinit var homeButton: ImageView
     private var pickerVisible = true
-    private var currentUrl = "https://popcornmovies.ac"
+    private var currentUrl = "https://mapple.rip"
     private var clearHistoryOnFinish = false
+
+    // true sejak masuk mode PiP sampai aplikasi dibuka lagi (onResume)
+    private var pipActive = false
 
     // Splash gambar saat aplikasi dibuka
     private var splashView: View? = null
@@ -251,6 +259,7 @@ class MainActivity : AppCompatActivity() {
         progress.visibility = View.GONE
         refreshPicker()
         picker.visibility = View.VISIBLE
+        refreshHomeButton()
     }
 
     private fun openSite(url: String) {
@@ -262,6 +271,7 @@ class MainActivity : AppCompatActivity() {
         picker.visibility = View.GONE
         swipe.visibility = View.VISIBLE
         webView.loadUrl(url)
+        refreshHomeButton()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -305,6 +315,7 @@ class MainActivity : AppCompatActivity() {
         picker.isFillViewport = true
         picker.addView(pickerList)
         root.addView(picker, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        setupHomeButton()
         setContentView(root)
         applyFullscreen()
 
@@ -437,6 +448,7 @@ class MainActivity : AppCompatActivity() {
                 customView = view
                 customViewCallback = callback
                 swipe.visibility = View.GONE
+                refreshHomeButton()
                 root.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 applyFullscreen()
             }
@@ -447,6 +459,7 @@ class MainActivity : AppCompatActivity() {
                 customViewCallback?.onCustomViewHidden()
                 customViewCallback = null
                 swipe.visibility = View.VISIBLE
+                refreshHomeButton()
                 applyFullscreen()
             }
         }
@@ -481,6 +494,7 @@ class MainActivity : AppCompatActivity() {
             picker.visibility = View.GONE
             swipe.visibility = View.VISIBLE
             webView.restoreState(savedInstanceState)
+            refreshHomeButton()
         } else {
             showPicker()
             // Splash hanya saat aplikasi baru dibuka (bukan saat dipulihkan sistem)
@@ -502,11 +516,13 @@ class MainActivity : AppCompatActivity() {
         splashView = image
         root.addView(image, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         splashHandler.postDelayed(splashRunnable, 2500)
+        refreshHomeButton()
     }
 
     private fun dismissSplash() {
         val v = splashView ?: return
         splashView = null
+        refreshHomeButton()
         splashHandler.removeCallbacks(splashRunnable)
         v.animate().alpha(0f).setDuration(350).withEndAction {
             root.removeView(v)
@@ -517,6 +533,85 @@ class MainActivity : AppCompatActivity() {
     private fun setWindowColors(color: Int) {
         window.setBackgroundDrawable(ColorDrawable(color))
         window.statusBarColor = color
+    }
+
+    // Tombol rumah melayang: ketuk untuk kembali ke daftar situs, geser untuk memindahkannya
+    private fun setupHomeButton() {
+        val size = dp(44)
+        homeButton = ImageView(this)
+        homeButton.setImageResource(R.drawable.ic_home)
+        homeButton.setPadding(dp(10), dp(10), dp(10), dp(10))
+        val bg = GradientDrawable()
+        bg.shape = GradientDrawable.OVAL
+        bg.setColor(0xCC1E1E2E.toInt())
+        homeButton.background = bg
+        homeButton.alpha = 0.7f
+        homeButton.contentDescription = "Kembali ke daftar situs"
+        homeButton.visibility = View.GONE
+
+        val lp = FrameLayout.LayoutParams(size, size, Gravity.END or Gravity.BOTTOM)
+        lp.rightMargin = dp(8)
+        lp.bottomMargin = dp(140)
+        root.addView(homeButton, lp)
+
+        var downX = 0f
+        var downY = 0f
+        var startTx = 0f
+        var startTy = 0f
+        var moved = false
+        homeButton.setOnTouchListener { v, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = ev.rawX
+                    downY = ev.rawY
+                    startTx = v.translationX
+                    startTy = v.translationY
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.rawX - downX
+                    val dy = ev.rawY - downY
+                    if (Math.abs(dx) > dp(6) || Math.abs(dy) > dp(6)) moved = true
+                    if (moved) {
+                        val minX = -v.left.toFloat()
+                        val maxX = (root.width - v.left - v.width).toFloat()
+                        val minY = -v.top.toFloat()
+                        val maxY = (root.height - v.top - v.height).toFloat()
+                        v.translationX = (startTx + dx).coerceIn(minX, maxX)
+                        v.translationY = (startTy + dy).coerceIn(minY, maxY)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) goHome()
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
+    // Tombol rumah hanya tampil saat sedang membuka website
+    private fun refreshHomeButton() {
+        val show = !pickerVisible && splashView == null && customView == null
+        homeButton.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    // Langsung ke daftar situs, apa pun halaman yang sedang dibuka
+    private fun goHome() {
+        if (splashView != null) dismissSplash()
+        if (customView != null) webView.webChromeClient?.onHideCustomView()
+        showPicker()
+    }
+
+    // Tahan tombol Back untuk langsung ke daftar situs
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && !pickerVisible) {
+            goHome()
+            return true
+        }
+        return super.onKeyLongPress(keyCode, event)
     }
 
     private fun startDownload(
@@ -574,8 +669,39 @@ class MainActivity : AppCompatActivity() {
         webView.saveState(outState)
     }
 
-    override fun onResume() { super.onResume(); webView.onResume() }
-    override fun onPause() { webView.onPause(); super.onPause() }
+    // Tekan Home saat video layar penuh -> video mengecil jadi jendela PiP
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (customView != null) {
+            try {
+                pipActive = true
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+                enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                pipActive = false
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pipActive = false
+        webView.onResume()
+    }
+
+    override fun onPause() {
+        // Saat masuk PiP, video harus tetap berjalan
+        if (!pipActive) webView.onPause()
+        super.onPause()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Jendela PiP ditutup (bukan diperbesar): hentikan video dan suaranya
+        if (pipActive) webView.onPause()
+    }
 
     override fun onDestroy() {
         splashHandler.removeCallbacks(splashRunnable)
