@@ -330,11 +330,16 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
             loadWithOverviewMode = true
             useWideViewPort = true
-            // Jendela baru dicegat lewat onCreateWindow; popup otomatis tanpa klik
-            // ditolak langsung oleh WebView.
+            // Semua jendela baru (termasuk yang dibuka skrip setelah klik) dicegat lewat
+            // onCreateWindow: hanya situs sendiri yang dibuka, domain lain diblokir.
             setSupportMultipleWindows(true)
-            javaScriptCanOpenWindowsAutomatically = false
+            javaScriptCanOpenWindowsAutomatically = true
         }
+
+        // Cookie (termasuk pihak ketiga) dibutuhkan situs seperti YouTube untuk tombol
+        // persetujuan/verifikasi, login, dan pemutar video.
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -345,6 +350,17 @@ class MainActivity : AppCompatActivity() {
                     // Email / telepon diserahkan ke aplikasi terkait
                     "mailto", "tel" -> {
                         try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (_: Exception) { }
+                        true
+                    }
+                    // Link "buka di aplikasi" (intent:) -> buka versi webnya di dalam aplikasi ini
+                    "intent" -> {
+                        try {
+                            val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+                            val target = intent.getStringExtra("browser_fallback_url") ?: intent.dataString
+                            if (target != null && (target.startsWith("http://") || target.startsWith("https://"))) {
+                                view.loadUrl(target)
+                            }
+                        } catch (_: Exception) { }
                         true
                     }
                     else -> true
