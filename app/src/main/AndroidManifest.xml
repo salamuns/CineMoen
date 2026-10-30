@@ -17,9 +17,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Mapple">
 
+        <!-- Beri tahu Xiaomi/MIUI & Huawei bahwa aplikasi mendukung layar berponi (portrait & landscape) -->
+        <meta-data
+            android:name="notch.config"
+            android:value="portrait|landscape" />
+        <meta-data
+            android:name="android.notch_support"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:screenOrientation="sensor"
+            android:supportsPictureInPicture="true"
             android:exported="true"
             android:theme="@style/Theme.Mapple.Splash"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
