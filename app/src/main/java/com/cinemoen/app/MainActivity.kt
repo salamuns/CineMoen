@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pickerList: LinearLayout
     private lateinit var homeButton: ImageView
     private var pickerVisible = true
-    private var currentUrl = "https://mapple.rip"
+    private var currentUrl = "https://7movies.ac"
     private var clearHistoryOnFinish = false
 
     // true sejak masuk mode PiP sampai aplikasi dibuka lagi (onResume)
@@ -108,7 +108,7 @@ class MainActivity : AppCompatActivity() {
         return if (parts.size <= 2) host.lowercase() else parts.takeLast(2).joinToString(".")
     }
 
-    // true jika host berasal dari situs yang sedang dibuka (atau mapple.rip)
+    // true jika host berasal dari situs yang sedang dibuka (atau salah satu alamat bawaan)
     private fun isSameSite(host: String?): Boolean {
         if (host == null) return false
         val target = rootDomain(host)
