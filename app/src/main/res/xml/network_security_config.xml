@@ -2,7 +2,7 @@
 <network-security-config>
     <!-- Percayai sertifikat sistem DAN sertifikat yang dipasang pengguna
          (mis. sertifikat AdGuard), seperti perilaku Chrome. -->
-    <base-config>
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />

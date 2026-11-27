@@ -28,6 +28,19 @@ android {
         versionName = "1.0.$buildNumber"
     }
 
+    // Dua varian dari kode yang sama: "mobile" (HP) dan "tv" (Google TV / Android TV)
+    flavorDimensions += "device"
+    productFlavors {
+        create("mobile") {
+            dimension = "device"
+        }
+        create("tv") {
+            dimension = "device"
+            applicationIdSuffix = ".tv"
+            versionNameSuffix = "-tv"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -45,4 +58,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.webkit:webkit:1.11.0")
 }

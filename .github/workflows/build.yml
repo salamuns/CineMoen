@@ -24,10 +24,10 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Build debug APK
+      - name: Build debug APK (HP dan Google TV)
         run: |
           set -o pipefail
-          gradle assembleDebug --console=plain 2>&1 | tee build.log
+          gradle assembleMobileDebug assembleTvDebug --console=plain 2>&1 | tee build.log
 
       - name: Ringkasan error
         if: failure()
@@ -51,10 +51,17 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/CineMoen.apk
+          cp app/build/outputs/apk/mobile/debug/app-mobile-debug.apk dist/CineMoen.apk
+          cp app/build/outputs/apk/tv/debug/app-tv-debug.apk dist/CineMoen-TV.apk
 
-      - name: Upload APK
+      - name: Upload APK HP
         uses: actions/upload-artifact@v4
         with:
           name: CineMoen-apk
           path: dist/CineMoen.apk
+
+      - name: Upload APK Google TV
+        uses: actions/upload-artifact@v4
+        with:
+          name: CineMoen-TV-apk
+          path: dist/CineMoen-TV.apk

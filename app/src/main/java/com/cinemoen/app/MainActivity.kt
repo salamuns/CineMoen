@@ -6,6 +6,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -17,6 +18,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Rational
 import android.view.Gravity
@@ -31,6 +33,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
@@ -50,6 +53,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 class MainActivity : AppCompatActivity() {
 
@@ -66,6 +72,228 @@ class MainActivity : AppCompatActivity() {
             // tambah yg lain 
         )
         private const val OFFLINE_URL = "file:///android_asset/offline.html"
+
+        // Skrip yang disuntikkan ke semua halaman & bingkai: tekan-tahan elemen (800 ms)
+        // untuk menyembunyikannya. Aturan disimpan per situs. __TOKEN__ diganti saat dipasang.
+        private val HIDE_JS = """
+(function () {
+  try {
+    if (window.__cmHide) return;
+    window.__cmHide = true;
+    var TOKEN = "__TOKEN__";
+    var KEY = "__cm_hide_" + TOKEN;
+    var LONG_MS = 800, MOVE_PX = 12;
+    var swallowUntil = 0;
+
+    function load() {
+      try {
+        var v = JSON.parse(localStorage.getItem(KEY) || "[]");
+        return Array.isArray(v) ? v : [];
+      } catch (e) { return []; }
+    }
+    function save(list) {
+      try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+    }
+
+    var styleEl = null;
+    function applyRules() {
+      try {
+        var list = load();
+        if (!styleEl) {
+          styleEl = document.createElement("style");
+          styleEl.setAttribute("data-cm", "1");
+        }
+        if (!styleEl.parentNode) {
+          var host = document.head || document.documentElement;
+          if (!host) return;
+          host.appendChild(styleEl);
+        }
+        styleEl.textContent = list.map(function (s) {
+          return s + "{display:none!important}";
+        }).join("\n");
+      } catch (e) {}
+    }
+
+    function esc(s) {
+      return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/[^\w-]/g, "_");
+    }
+    function uniq(sel) {
+      try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
+    }
+    function pathSel(el) {
+      var parts = [];
+      while (el && el.nodeType === 1 && el !== document.documentElement) {
+        if (el === document.body) { parts.unshift("body"); break; }
+        var idx = 1, sib = el;
+        while ((sib = sib.previousElementSibling)) {
+          if (sib.tagName === el.tagName) idx++;
+        }
+        parts.unshift(el.tagName.toLowerCase() + ":nth-of-type(" + idx + ")");
+        el = el.parentElement;
+      }
+      return parts.join(" > ");
+    }
+    function selectorFor(el) {
+      if (el.id && uniq("#" + esc(el.id))) return "#" + esc(el.id);
+      var cls = [];
+      for (var i = 0; i < el.classList.length && cls.length < 3; i++) {
+        var c = el.classList[i];
+        if (c.length <= 30) cls.push("." + esc(c));
+      }
+      if (cls.length) {
+        var s = el.tagName.toLowerCase() + cls.join("");
+        if (uniq(s)) return s;
+      }
+      return pathSel(el);
+    }
+
+    function area(el) {
+      var r = el.getBoundingClientRect();
+      return Math.max(0, r.width) * Math.max(0, r.height);
+    }
+    function vpArea() { return Math.max(1, window.innerWidth * window.innerHeight); }
+    function hasVideo(el) { return !!(el.querySelector && el.querySelector("video")); }
+    function isFloating(cs) {
+      return cs.position === "fixed" || cs.position === "absolute" || cs.position === "sticky";
+    }
+
+    function pickTarget(el) {
+      if (!el || el === document.body || el === document.documentElement) return null;
+      if (el.tagName === "VIDEO" || (el.closest && el.closest("video"))) return null;
+      var limit = 0.9 * vpArea();
+      var best = null, n = el;
+      // 1) naik lewat rantai elemen melayang (fixed/absolute), tanpa melewati pemutar video
+      while (n && n !== document.body && n !== document.documentElement) {
+        if (hasVideo(n)) break;
+        if (isFloating(getComputedStyle(n)) && area(n) < limit) best = n;
+        n = n.parentElement;
+      }
+      // 2) jika tidak ada: naik selama pembungkusnya berukuran sama
+      if (!best) {
+        best = el;
+        while (best.parentElement && best.parentElement !== document.body) {
+          var p = best.parentElement;
+          if (hasVideo(p)) break;
+          var rb = best.getBoundingClientRect(), rp = p.getBoundingClientRect();
+          if (rp.width <= rb.width * 1.1 + 4 && rp.height <= rb.height * 1.1 + 4) best = p;
+          else break;
+        }
+      }
+      if (area(best) >= limit) return null;
+      return best;
+    }
+
+    function toast(msg, undo) {
+      try {
+        var old = document.getElementById("__cm_toast");
+        if (old) old.remove();
+        var d = document.createElement("div");
+        d.id = "__cm_toast";
+        d.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);" +
+          "z-index:2147483647;background:rgba(20,20,30,.92);color:#fff;font:14px sans-serif;" +
+          "padding:10px 14px;border-radius:10px;display:flex;gap:12px;align-items:center;max-width:90%";
+        var s = document.createElement("span");
+        s.textContent = msg;
+        d.appendChild(s);
+        if (undo) {
+          var b = document.createElement("button");
+          b.textContent = "Batal";
+          b.style.cssText = "background:#3d7bff;color:#fff;border:0;border-radius:8px;" +
+            "padding:6px 12px;font:14px sans-serif";
+          b.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            undo();
+            d.remove();
+          });
+          d.appendChild(b);
+        }
+        (document.body || document.documentElement).appendChild(d);
+        setTimeout(function () { if (d.parentNode) d.remove(); }, 5000);
+      } catch (e) {}
+    }
+
+    function hideAt(x, y) {
+      var target = pickTarget(document.elementFromPoint(x, y));
+      swallowUntil = Date.now() + 1200;
+      if (!target) { toast("Elemen ini tidak bisa disembunyikan"); return; }
+      var sel = selectorFor(target);
+      var list = load();
+      if (list.indexOf(sel) < 0) { list.push(sel); save(list); }
+      applyRules();
+      toast("Elemen disembunyikan", function () {
+        var l = load(), i = l.indexOf(sel);
+        if (i >= 0) { l.splice(i, 1); save(l); applyRules(); }
+      });
+    }
+
+    var timer = null, sx = 0, sy = 0, fired = false;
+    function cancel() { if (timer) { clearTimeout(timer); timer = null; } }
+    var opt = { passive: true, capture: true };
+    document.addEventListener("touchstart", function (e) {
+      cancel();
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      sx = t.clientX; sy = t.clientY; fired = false;
+      timer = setTimeout(function () { timer = null; fired = true; hideAt(sx, sy); }, LONG_MS);
+    }, opt);
+    document.addEventListener("touchmove", function (e) {
+      var t = e.touches[0];
+      if (!t) return;
+      if (Math.abs(t.clientX - sx) > MOVE_PX || Math.abs(t.clientY - sy) > MOVE_PX) cancel();
+    }, opt);
+    document.addEventListener("touchend", cancel, opt);
+    document.addEventListener("touchcancel", cancel, opt);
+    document.addEventListener("contextmenu", function (e) { if (fired) e.preventDefault(); }, true);
+    // Cegah "klik" ikutan yang muncul setelah tekan-tahan (supaya tidak mengenai elemen di bawahnya)
+    document.addEventListener("click", function (e) {
+      if (Date.now() < swallowUntil) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+
+    applyRules();
+    document.addEventListener("DOMContentLoaded", applyRules);
+  } catch (e) {}
+})();
+
+"""
+
+        // Skrip kecil di setiap halaman/bingkai: saat jari menyentuh layar, laporkan ke aplikasi apakah
+        // ada kotak gulir (di dalam halaman) yang sedang tergulir ke bawah. Dipakai agar
+        // pull-to-refresh tidak ikut terpicu saat Anda menggulir ke atas di dalam kotak itu.
+        private val SCROLL_JS = """
+(function () {
+  try {
+    if (window.__cmScroll) return;
+    window.__cmScroll = true;
+    function canScrollUp(el) {
+      while (el && el !== document.documentElement) {
+        if (el.nodeType === 1) {
+          var oy = getComputedStyle(el).overflowY;
+          if ((oy === "auto" || oy === "scroll" || oy === "overlay") &&
+              el.scrollHeight > el.clientHeight + 1 && el.scrollTop > 0) return true;
+        }
+        el = el.parentElement;
+      }
+      var se = document.scrollingElement;
+      return !!(se && se.scrollTop > 0);
+    }
+    document.addEventListener("touchstart", function (e) {
+      try {
+        if (!window.cmScroll) return;
+        window.cmScroll.postMessage(canScrollUp(e.target) ? "1" : "0");
+      } catch (err) {}
+    }, { passive: true, capture: true });
+  } catch (e) {}
+})();
+"""
+
+        // Akhiran domain dua tingkat (mis. "co.id") agar "a.co.id" dan "b.co.id" tidak dianggap satu situs
+        private val SECOND_LEVEL_SUFFIXES = setOf(
+            "co.id", "or.id", "ac.id", "go.id", "web.id", "my.id", "sch.id",
+            "co.uk", "org.uk", "ac.uk", "gov.uk",
+            "com.au", "net.au", "org.au",
+            "co.jp", "co.in", "co.nz", "co.za", "co.kr",
+            "com.br", "com.sg", "com.my", "com.tr", "com.pk", "com.hk", "com.tw", "com.ph", "com.vn", "com.mx"
+        )
     }
 
     private lateinit var root: FrameLayout
@@ -75,11 +303,23 @@ class MainActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var failedUrl: String? = null
+    @Volatile private var innerScrolled = false
 
     // Layar pilihan alamat
     private lateinit var picker: ScrollView
     private lateinit var pickerList: LinearLayout
     private lateinit var homeButton: ImageView
+
+    // Mode Google TV / Android TV (dikendalikan dengan remote)
+    // Ditentukan oleh varian build: true untuk APK TV, false untuk APK HP
+    private val isTv: Boolean by lazy { resources.getBoolean(R.bool.is_tv) }
+    private lateinit var cursorView: View
+    private var cursorX = 0f
+    private var cursorY = 0f
+    private val cursorHandler = Handler(Looper.getMainLooper())
+    private val hideCursor = Runnable { cursorView.alpha = 0f }
+    private var tvHintShown = false
+    private var hideScript: ScriptHandler? = null
     private var pickerVisible = true
     private var currentUrl = "https://7movies.ac"
     private var clearHistoryOnFinish = false
@@ -104,8 +344,11 @@ class MainActivity : AppCompatActivity() {
 
     // Ambil domain induk, misal "www.mapple.rip" -> "mapple.rip"
     private fun rootDomain(host: String): String {
-        val parts = host.lowercase().split(".")
-        return if (parts.size <= 2) host.lowercase() else parts.takeLast(2).joinToString(".")
+        val h = host.lowercase()
+        val parts = h.split(".")
+        if (parts.size <= 2) return h
+        val lastTwo = parts.takeLast(2).joinToString(".")
+        return if (lastTwo in SECOND_LEVEL_SUFFIXES) parts.takeLast(3).joinToString(".") else lastTwo
     }
 
     // true jika host berasal dari situs yang sedang dibuka (atau salah satu alamat bawaan)
@@ -154,6 +397,9 @@ class MainActivity : AppCompatActivity() {
         row.background = bg
         row.setPadding(dp(20), dp(16), dp(12), dp(16))
         row.setOnClickListener { onClick() }
+        // Remote/D-pad: baris bisa difokuskan dan diberi garis putih saat terpilih
+        row.isFocusable = true
+        row.setOnFocusChangeListener { _, has -> bg.setStroke(if (has) dp(3) else 0, Color.WHITE) }
 
         val tv = TextView(this)
         tv.text = label
@@ -168,6 +414,10 @@ class MainActivity : AppCompatActivity() {
             x.setTextColor(0xFFFF8A80.toInt())
             x.setPadding(dp(16), dp(4), dp(16), dp(4))
             x.setOnClickListener { onDelete() }
+            x.isFocusable = true
+            x.setOnFocusChangeListener { _, has ->
+                x.setTextColor(if (has) Color.WHITE else 0xFFFF8A80.toInt())
+            }
             row.addView(x)
         }
 
@@ -182,6 +432,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshPicker() {
         pickerList.removeAllViews()
+        // Layar lebar (TV/landscape): batasi lebar daftar agar tidak terlalu melebar
+        val side = maxOf(dp(24), (resources.displayMetrics.widthPixels - dp(640)) / 2)
+        pickerList.setPadding(side, dp(72), side, dp(40))
 
         val title = TextView(this)
         title.text = "Pilih alamat"
@@ -204,6 +457,8 @@ class MainActivity : AppCompatActivity() {
             )
         }
         pickerList.addView(makeRow("+  Tambah URL lain", true, { showAddDialog() }, null))
+        // Di TV, fokus awal ke pilihan pertama
+        if (isTv) pickerList.getChildAt(2)?.requestFocus()
     }
 
     private fun showAddDialog() {
@@ -257,8 +512,9 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl("about:blank")
         swipe.visibility = View.GONE
         progress.visibility = View.GONE
-        refreshPicker()
+        // Tampilkan dulu baru isi daftar, agar fokus remote (TV) ke pilihan pertama berhasil dipasang
         picker.visibility = View.VISIBLE
+        refreshPicker()
         refreshHomeButton()
     }
 
@@ -272,6 +528,14 @@ class MainActivity : AppCompatActivity() {
         swipe.visibility = View.VISIBLE
         webView.loadUrl(url)
         refreshHomeButton()
+        if (isTv && !tvHintShown) {
+            tvHintShown = true
+            Toast.makeText(
+                this,
+                "Panah: gerakkan kursor  |  OK: klik  |  Menu atau tahan Back: ke daftar situs",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -296,7 +560,7 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this)
         swipe = SwipeRefreshLayout(this).apply {
             addView(webView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
+            setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 || innerScrolled }
             setOnRefreshListener {
                 if (webView.url?.startsWith(OFFLINE_URL) == true) {
                     webView.loadUrl(failedUrl ?: currentUrl)
@@ -321,6 +585,7 @@ class MainActivity : AppCompatActivity() {
         picker.addView(pickerList)
         root.addView(picker, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         setupHomeButton()
+        setupCursor()
         setContentView(root)
         applyFullscreen()
 
@@ -330,6 +595,8 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
             loadWithOverviewMode = true
             useWideViewPort = true
+            // Izinkan gambar/video http di halaman https (konten aktif seperti skrip tetap diblokir)
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             // Semua jendela baru (termasuk yang dibuka skrip setelah klik) dicegat lewat
             // onCreateWindow: hanya situs sendiri yang dibuka, domain lain diblokir.
             setSupportMultipleWindows(true)
@@ -340,6 +607,8 @@ class MainActivity : AppCompatActivity() {
         // persetujuan/verifikasi, login, dan pemutar video.
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        installHideScript()
+        installScrollBridge()
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -471,6 +740,7 @@ class MainActivity : AppCompatActivity() {
                 swipe.visibility = View.GONE
                 refreshHomeButton()
                 root.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                if (isTv) cursorView.bringToFront()
                 applyFullscreen()
             }
 
@@ -525,19 +795,53 @@ class MainActivity : AppCompatActivity() {
 
     // Splash: poster logo tampil sebentar, ketuk layar untuk melewati
     private fun showSplash() {
-        val image = ImageView(this)
-        image.setImageResource(R.drawable.splash_poster)
-        // Isi seluruh layar; kelebihan atas/bawah gambar (putih & biru) dipotong sesuai rasio layar
-        image.scaleType = ImageView.ScaleType.CENTER_CROP
-        image.setBackgroundColor(0xFF063449.toInt())
-        image.setOnClickListener { dismissSplash() }
+        val view: View
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            view = buildLandscapeSplash()
+        } else {
+            val image = ImageView(this)
+            image.setImageResource(R.drawable.splash_poster)
+            // Isi seluruh layar; kelebihan atas/bawah gambar (putih & biru) dipotong sesuai rasio layar
+            image.scaleType = ImageView.ScaleType.CENTER_CROP
+            image.setBackgroundColor(0xFF063449.toInt())
+            view = image
+        }
+        view.setOnClickListener { dismissSplash() }
 
         // Warnai latar jendela & status bar putih selama splash agar strip atas menyatu dengan poster
         setWindowColors(0xFFFEFEFE.toInt())
-        splashView = image
-        root.addView(image, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        splashView = view
+        root.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         splashHandler.postDelayed(splashRunnable, 2500)
         refreshHomeButton()
+    }
+
+    // Splash untuk layar lebar (TV / landscape): logo di tengah dengan nama aplikasi
+    private fun buildLandscapeSplash(): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER
+        box.setBackgroundColor(0xFFFEFEFE.toInt())
+
+        val logo = ImageView(this)
+        logo.setImageResource(R.drawable.ic_launcher_foreground)
+        logo.scaleType = ImageView.ScaleType.FIT_CENTER
+        val size = (resources.displayMetrics.heightPixels * 0.55f).toInt()
+        box.addView(logo, LinearLayout.LayoutParams(size, size))
+
+        val name = TextView(this)
+        name.text = "CineMoen"
+        name.textSize = 34f
+        name.setTextColor(0xFF0A3349.toInt())
+        name.gravity = Gravity.CENTER
+        box.addView(
+            name,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        return box
     }
 
     private fun dismissSplash() {
@@ -554,6 +858,109 @@ class MainActivity : AppCompatActivity() {
     private fun setWindowColors(color: Int) {
         window.setBackgroundDrawable(ColorDrawable(color))
         window.statusBarColor = color
+    }
+
+    // ===== Google TV / Android TV: kursor virtual yang digerakkan dengan panah remote =====
+    private fun setupCursor() {
+        val size = dp(26)
+        cursorView = View(this)
+        val bg = GradientDrawable()
+        bg.shape = GradientDrawable.OVAL
+        bg.setColor(0xCCFFFFFF.toInt())
+        bg.setStroke(dp(3), 0xFF1E1E2E.toInt())
+        cursorView.background = bg
+        cursorView.alpha = 0f
+        cursorView.visibility = if (isTv) View.VISIBLE else View.GONE
+        root.addView(cursorView, FrameLayout.LayoutParams(size, size))
+        root.post {
+            cursorX = root.width / 2f
+            cursorY = root.height / 2f
+            updateCursor()
+        }
+    }
+
+    private fun updateCursor() {
+        cursorView.translationX = cursorX - dp(13)
+        cursorView.translationY = cursorY - dp(13)
+    }
+
+    private fun showCursorBriefly() {
+        cursorView.alpha = 1f
+        cursorHandler.removeCallbacks(hideCursor)
+        cursorHandler.postDelayed(hideCursor, 4000)
+    }
+
+    private fun moveCursor(keyCode: Int, repeat: Int) {
+        // Makin lama tombol ditahan, makin cepat
+        val step = dp(14) * (1f + minOf(repeat, 20) / 4f)
+        var dx = 0f
+        var dy = 0f
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> dy = -step
+            KeyEvent.KEYCODE_DPAD_DOWN -> dy = step
+            KeyEvent.KEYCODE_DPAD_LEFT -> dx = -step
+            else -> dx = step
+        }
+        val maxX = root.width - 1f
+        val maxY = root.height - 1f
+        val edge = dp(48)
+        // Kursor di tepi atas/bawah: gulir halaman
+        if (customView == null) {
+            if (dy < 0f && cursorY <= edge) webView.scrollBy(0, (dy * 4f).toInt())
+            if (dy > 0f && cursorY >= maxY - edge) webView.scrollBy(0, (dy * 4f).toInt())
+        }
+        cursorX = (cursorX + dx).coerceIn(0f, maxX)
+        cursorY = (cursorY + dy).coerceIn(0f, maxY)
+        updateCursor()
+        showCursorBriefly()
+    }
+
+    // Tombol OK pada remote = ketuk layar di posisi kursor
+    private fun clickAt(x: Float, y: Float) {
+        val target: View = customView ?: webView
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        target.dispatchTouchEvent(down)
+        down.recycle()
+        cursorHandler.postDelayed({
+            val up = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y, 0)
+            target.dispatchTouchEvent(up)
+            up.recycle()
+        }, 60)
+        showCursorBriefly()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isTv && !pickerVisible && splashView == null) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) moveCursor(event.keyCode, event.repeatCount)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                        clickAt(cursorX, cursorY)
+                    }
+                    return true
+                }
+                KeyEvent.KEYCODE_MENU -> {
+                    if (event.action == KeyEvent.ACTION_UP) goHome()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    // Layar diputar / ukuran berubah: sesuaikan lebar daftar situs
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (pickerVisible) refreshPicker()
     }
 
     // Tombol rumah melayang: ketuk untuk kembali ke daftar situs, geser untuk memindahkannya
@@ -580,6 +987,7 @@ class MainActivity : AppCompatActivity() {
         var startTx = 0f
         var startTy = 0f
         var moved = false
+        var downAt = 0L
         homeButton.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -588,6 +996,7 @@ class MainActivity : AppCompatActivity() {
                     startTx = v.translationX
                     startTy = v.translationY
                     moved = false
+                    downAt = System.currentTimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -605,7 +1014,9 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) goHome()
+                    if (!moved) {
+                        if (System.currentTimeMillis() - downAt > 700) confirmResetHidden() else goHome()
+                    }
                     true
                 }
                 else -> true
@@ -615,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
 
     // Tombol rumah hanya tampil saat sedang membuka website
     private fun refreshHomeButton() {
-        val show = !pickerVisible && splashView == null && customView == null
+        val show = !pickerVisible && splashView == null && customView == null && !isTv
         homeButton.visibility = if (show) View.VISIBLE else View.GONE
     }
 
@@ -633,6 +1044,45 @@ class MainActivity : AppCompatActivity() {
             return true
         }
         return super.onKeyLongPress(keyCode, event)
+    }
+
+    // Pasang skrip penyembunyi elemen ke semua halaman (termasuk di dalam pemutar/bingkai)
+    private fun installHideScript() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        val token = prefs.getInt("hide_token", 1)
+        hideScript?.remove()
+        hideScript = WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            HIDE_JS.replace("__TOKEN__", token.toString()),
+            setOf("*")
+        )
+    }
+
+    // Terima laporan dari SCROLL_JS (kotak gulir di dalam halaman) untuk pull-to-refresh
+    private fun installScrollBridge() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        try {
+            WebViewCompat.addWebMessageListener(webView, "cmScroll", setOf("*")) { _, message, _, _, _ ->
+                innerScrolled = (message.data == "1")
+            }
+            WebViewCompat.addDocumentStartJavaScript(webView, SCROLL_JS, setOf("*"))
+        } catch (e: Exception) {
+            // Jika gagal, pull-to-refresh tetap jalan seperti biasa
+        }
+    }
+
+    private fun confirmResetHidden() {
+        AlertDialog.Builder(this)
+            .setTitle("Tampilkan lagi elemen yang disembunyikan?")
+            .setMessage("Semua elemen yang pernah Anda sembunyikan akan muncul kembali.")
+            .setPositiveButton("Tampilkan lagi") { _, _ ->
+                prefs.edit().putInt("hide_token", prefs.getInt("hide_token", 1) + 1).apply()
+                installHideScript()
+                webView.reload()
+            }
+            .setNegativeButton("Batal", null)
+            .show()
     }
 
     private fun startDownload(
