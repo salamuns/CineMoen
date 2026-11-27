@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Dibutuhkan untuk menerbitkan APK sebagai Release (link unduhan tetap)
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -65,3 +69,14 @@ jobs:
         with:
           name: CineMoen-TV-apk
           path: dist/CineMoen-TV.apk
+
+      - name: Terbitkan APK sebagai Release (link unduhan tetap)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/CineMoen.apk dist/CineMoen-TV.apk \
+            --target "${{ github.sha }}" \
+            --title "CineMoen terbaru (build ${{ github.run_number }})" \
+            --notes "CineMoen.apk untuk HP, CineMoen-TV.apk untuk Google TV. Dibangun otomatis dari commit ${{ github.sha }}."
